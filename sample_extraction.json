@@ -1,0 +1,78 @@
+{
+  "goals": [
+    {
+      "id": "G1",
+      "title": "Launch Focus & Calm Gel Pouches D2C Storefront by Dec 15, 2026",
+      "owner": "Shahaan",
+      "target_date": "2026-12-15",
+      "priority_weight": 3,
+      "health_status": "On Track",
+      "health_reason": "All tasks within target window."
+    },
+    {
+      "id": "G2",
+      "title": "Seed 20 Mumbai Fitness Influencers by Dec 20, 2026",
+      "owner": "Bhargav",
+      "target_date": "2026-12-20",
+      "priority_weight": 1,
+      "health_status": "On Track",
+      "health_reason": "All tasks within target window."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Finalize botanical flavor stability test for Focus pouch",
+      "owner": "Shahaan",
+      "due_date": "2026-11-22",
+      "status": "Proposed",
+      "goal_id": "G1",
+      "blocked_by": []
+    },
+    {
+      "id": "T2",
+      "title": "Send final ingredient list to packaging vendor to lock pouch print files",
+      "owner": "Riya",
+      "due_date": "2026-11-26",
+      "status": "Proposed",
+      "goal_id": "G1",
+      "blocked_by": ["T1"]
+    },
+    {
+      "id": "T3",
+      "title": "Kick off 5,000-unit pouch print run",
+      "owner": "Shahaan",
+      "due_date": "2026-12-04",
+      "status": "Proposed",
+      "goal_id": "G1",
+      "blocked_by": ["T2"]
+    },
+    {
+      "id": "T4",
+      "title": "Shoot product campaign photos",
+      "owner": "Bhargav",
+      "due_date": "2026-12-09",
+      "status": "Proposed",
+      "goal_id": "G1",
+      "blocked_by": ["T3"]
+    },
+    {
+      "id": "T5",
+      "title": "Push live storefront update on Vercel",
+      "owner": "Bhargav",
+      "due_date": "2026-12-13",
+      "status": "Proposed",
+      "goal_id": "G1",
+      "blocked_by": ["T4"]
+    },
+    {
+      "id": "T6",
+      "title": "Compile shortlist of 20 Mumbai fitness influencers",
+      "owner": "Riya",
+      "due_date": "2026-11-23",
+      "status": "Proposed",
+      "goal_id": "G2",
+      "blocked_by": []
+    }
+  ]
+}

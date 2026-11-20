@@ -1,0 +1,28 @@
+Extract ALL company Goals and ALL dependency-linked Tasks from these meeting notes.
+Return ONLY valid JSON matching this exact structure (use YYYY-MM-DD for dates):
+
+{
+  "goals": [
+    {
+      "id": "G1",
+      "title": "string",
+      "owner": "string",
+      "target_date": "2026-12-15",
+      "priority_weight": 3
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "string",
+      "owner": "string",
+      "due_date": "2026-11-22",
+      "status": "Proposed",
+      "goal_id": "G1",
+      "blocked_by": []
+    }
+  ]
+}
+
+Meeting Notes:
+{notes_text}

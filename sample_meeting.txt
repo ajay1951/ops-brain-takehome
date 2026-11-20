@@ -1,0 +1,10 @@
+﻿Meeting: Pre-Launch Weekly Sync (Nov 20, 2026)
+
+Goal 1 (G1): Launch Focus & Calm Gel Pouches D2C Storefront by Dec 15, 2026 (Owner: Shahaan, Priority: High / 3)
+Goal 2 (G2): Seed 20 Mumbai Fitness Influencers by Dec 20, 2026 (Owner: Bhargav, Priority: Low / 1)
+
+Shahaan: For G1, we need to finalize the botanical flavor stability test for the Focus pouch by Nov 22. I'll own that.
+Bhargav: Once Shahaan finishes the flavor stability test, Riya needs to send the final ingredient list to our packaging vendor to lock pouch print files—due Nov 26.
+Shahaan: After Riya locks the print files, I'll kick off the 5,000-unit pouch print run, due Dec 4.
+Bhargav: Once printed pouches arrive, I'll shoot the product campaign photos by Dec 9, and then push the live storefront update on Vercel by Dec 13 so we hit our Dec 15 launch.
+Bhargav: For G2, Riya should also compile the shortlist of 20 Mumbai fitness influencers by Nov 23.
