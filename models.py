@@ -23,6 +23,7 @@ class Task(BaseModel):
     priority_score: float = 0.0
     priority_reason: str = ""
     nudge_count: int = 0
+    approved_by: Optional[str] = None
 
 class ExtractionResult(BaseModel):
     goals: List[Goal]

@@ -14,12 +14,10 @@ load_dotenv()
 console = Console()
 
 
-def extract_from_notes(notes_text: str, anchor_date: date = date(2026, 11, 20)) -> tuple[ExtractionResult, RunLog]:
+def extract_from_notes(notes_text: str, anchor_date: date) -> tuple[ExtractionResult, RunLog]:
     """
-    Catch 4 & Catch 7 Fixes:
-    1. Injects reference anchor date into prompt to prevent LLM date amnesia.
-    2. Separates system instructions from untrusted transcripts inside <meeting_transcript> tags
-       to neutralize prompt injection vectors.
+    Ingests meeting notes using versioned prompt template.
+    Enforces anchor date reference and separates system prompt from untrusted transcript.
     """
     prompt_template_path = Path("prompts/extraction_v1.txt")
     template = prompt_template_path.read_text(encoding="utf-8")
@@ -50,7 +48,7 @@ def extract_from_notes(notes_text: str, anchor_date: date = date(2026, 11, 20)) 
             in_tok = usage.prompt_tokens if usage else (len(system_instruction) + len(user_payload)) // 4
             out_tok = usage.completion_tokens if usage else len(raw_content) // 4
 
-            # Approx Groq open-source pricing (~$0.15 / 1M prompt, $0.60 / 1M completion)
+            # Groq open-source pricing (~$0.15 / 1M prompt, $0.60 / 1M completion)
             cost = (in_tok * 0.00000015) + (out_tok * 0.00000060)
 
             extracted = ExtractionResult.model_validate_json(raw_content)
@@ -65,7 +63,7 @@ def extract_from_notes(notes_text: str, anchor_date: date = date(2026, 11, 20)) 
             )
             return extracted, run_log
         except Exception as e:
-            console.print(f"[yellow]Groq API unavailable ({type(e).__name__}). Using versioned offline fallback dataset.[/yellow]")
+            console.print(f"[yellow]Groq API connection error ({type(e).__name__}: {e}). Using offline dataset.[/yellow]")
 
     # Resilient offline fallback for Loom recording & air-gapped demo
     fallback_data = Path("sample_extraction.json").read_text(encoding="utf-8")
@@ -110,7 +108,7 @@ def print_tasks(title: str, tasks):
 
 
 def print_team_views(engine: OpsBrainEngine):
-    console.print("[bold cyan]Team Member 'My Day' Views (Blocked / Blocking) with Verified Slack IDs:[/bold cyan]")
+    console.print("[bold cyan]Team Member 'My Day' Views (Blocked / Blocking):[/bold cyan]")
     owners = sorted(set(t.owner for t in engine.tasks.values()))
     for owner in owners:
         my_tasks = sorted(
@@ -130,7 +128,8 @@ def print_team_views(engine: OpsBrainEngine):
 
 
 def main():
-    today = date(2026, 11, 20)
+    # Anchor date matches the meeting timestamp in sample_meeting.txt for deterministic testing
+    anchor_date = date(2026, 11, 20)
     if Path("state.json").exists():
         Path("state.json").unlink()
 
@@ -138,12 +137,11 @@ def main():
 
     # 1. Ingestion via versioned config with anchor date
     console.print("\n[bold blue]1. Ingesting meeting notes via versioned config (prompts/extraction_v1.txt)...[/bold blue]")
-    extracted, run_meta = extract_from_notes(notes, anchor_date=today)
-    console.print(f"   [dim]Extracted {len(extracted.goals)} Goals and {len(extracted.tasks)} Tasks (Anchor Date: {today}).[/dim]")
+    extracted, run_meta = extract_from_notes(notes, anchor_date=anchor_date)
+    console.print(f"   [dim]Extracted {len(extracted.goals)} Goals and {len(extracted.tasks)} Tasks (Anchor Date: {anchor_date}).[/dim]")
 
-    engine = OpsBrainEngine(extracted.goals, extracted.tasks, today=today)
+    engine = OpsBrainEngine(extracted.goals, extracted.tasks, today=anchor_date)
 
-    # Catch 3 Audit: Check Graph Integrity
     if engine.integrity_warnings:
         console.print("[yellow]Integrity Warnings:[/yellow]")
         for w in engine.integrity_warnings:
@@ -153,10 +151,11 @@ def main():
     console.print("\n[bold yellow]2. Human Approval Gate (Build Principle Requirement):[/bold yellow]")
     console.print("   Tasks extracted with initial status: [bold magenta]Proposed[/bold magenta].")
     console.print("   [italic]Reviewing proposed task assignments before notifying team...[/italic]")
-    approved_ids = engine.approve_all_tasks(approver="Shahaan (Meeting Organizer)")
-    run_meta.approved_by = "Shahaan (Meeting Organizer)"
+    approver_name = "Shahaan (Meeting Organizer)"
+    approved_ids = engine.approve_all_tasks(approver=approver_name)
+    run_meta.approved_by = approver_name
     log_run(run_meta)
-    console.print(f"   [bold green]✓ Approved {len(approved_ids)} tasks by Shahaan. Status transitioned: Proposed -> Active.[/bold green]\n")
+    console.print(f"   [bold green]✓ Approved {len(approved_ids)} tasks by {approver_name}. Status transitioned: Proposed -> Active.[/bold green]\n")
 
     # 3. Deterministic Priority Ranking
     ranked = engine.compute_priorities()
@@ -164,24 +163,23 @@ def main():
     engine.check_state_diff()
     print_team_views(engine)
 
-    # 4. Prove Day-to-Day Stability (Catch 1 Fix)
-    console.print("[bold green]3. Stability Check (Catch 1 Hardened: Ordinal rank diffing prevents daily score drift)...[/bold green]")
-    # Re-running compute_priorities with no real operational changes:
+    # 4. Day-to-Day Stability Check
+    console.print("[bold green]3. Stability Check (Ordinal rank diffing prevents daily score drift)...[/bold green]")
     engine.compute_priorities()
     diffs = engine.check_state_diff()
     console.print(f"   Diffs detected: {len(diffs)} -> Skipping Notion/Slack writes (priorities stay stable day-to-day).\n")
 
-    # 5. Automated Follow-ups (Catch 6 Fix: Verified Slack User IDs)
-    console.print("[bold yellow]4. Automated Follow-Up Nudges (Catch 6 Hardened: Using Slack User IDs):[/bold yellow]")
+    # 5. Automated Follow-ups
+    console.print("[bold yellow]4. Automated Follow-Up Nudges (Targeting Slack User IDs):[/bold yellow]")
     for nudge in engine.generate_followups():
         console.print(f"   • [{nudge['type']}] DM to [cyan]{nudge['target']}[/cyan]: {nudge['text']} | Buttons: {nudge.get('slack_actions')}")
 
-    # 6. Cascading Slip Simulation (Catch 2 & 5 Fixes: Task Duration Math + Non-Destructive isolation)
+    # 6. Cascading Slip Simulation
     first_task_id = extracted.tasks[0].id
     console.print(
-        f"\n[bold red]5. Cascading Slip Simulation (Catch 2: Duration Math, Catch 5: Isolated State)...[/bold red]"
+        f"\n[bold red]5. Cascading Slip Simulation (Duration Math & Downstream Propagation)...[/bold red]"
     )
-    alerts, updated_goal, sim_tasks = engine.simulate_slip(first_task_id, slip_days=10, mutate_state=True)
+    alerts, updated_goal = engine.simulate_slip(first_task_id, slip_days=10)
     for alert in alerts:
         console.print(f"   • Alert to [cyan]{alert['channel']}[/cyan]: {alert['message']}")
 
@@ -200,7 +198,7 @@ def main():
             Task(id="T1", title="A", owner="Shahaan", due_date=date(2026, 11, 25), goal_id="G1", blocked_by=["T2"]),
             Task(id="T2", title="B", owner="Bhargav", due_date=date(2026, 11, 26), goal_id="G1", blocked_by=["T1"]),
         ]
-        OpsBrainEngine(extracted.goals, bad_tasks, today=today)
+        OpsBrainEngine(extracted.goals, bad_tasks, today=anchor_date)
     except ValueError as e:
         console.print(f"   [bold green]Caught safely:[/bold green] {e}\n")
 

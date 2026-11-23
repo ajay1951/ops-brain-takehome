@@ -1,19 +1,16 @@
 import copy
 import json
-import logging
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Dict, List, Tuple
 import networkx as nx
 from models import Goal, Task, RunLog
 
-logger = logging.getLogger("ops_brain")
-
-# Identity Resolution: Map plain-text names to official Slack User IDs
+# Map team members to production Slack User IDs for targeted Block Kit DMs
 USER_DIRECTORY = {
-    "shahaan": "U081A4B91",
-    "riya": "U081A4B92",
-    "bhargav": "U081A4B93",
+    "shahaan": "U05QZ7B2K9X",
+    "riya": "U03K7L9M2PQ",
+    "bhargav": "U04A8B9C1DE",
 }
 
 def resolve_slack_target(owner: str) -> str:
@@ -42,33 +39,34 @@ class OpsBrainEngine:
         fallback_goal_id = next(iter(self.goals.keys())) if self.goals else "G_DEFAULT"
 
         for task in self.tasks.values():
-            # Catch 3 Fix: Foreign Key Validation for Goals
+            # Validate goal reference exists
             if task.goal_id not in self.goals:
                 self.integrity_warnings.append(
-                    f"Task '{task.id}' referenced unknown goal '{task.goal_id}'. Reassigned to '{fallback_goal_id}'."
+                    f"Task '{task.id}' referenced unknown goal '{task.goal_id}'; reassigned to '{fallback_goal_id}'."
                 )
                 task.goal_id = fallback_goal_id
 
-            # Catch 3 Fix: Explicit Foreign Key Validation for Dependencies (no silent drops)
+            # Verify prerequisites exist in task registry
             for dep_id in task.blocked_by:
                 if dep_id in self.tasks:
                     self.graph.add_edge(dep_id, task.id)
                 else:
                     self.integrity_warnings.append(
-                        f"Integrity Warning: Task '{task.id}' depends on missing task '{dep_id}'. Dependency flagged for manual review."
+                        f"Integrity Warning: Task '{task.id}' depends on missing task '{dep_id}'."
                     )
 
-        # Guardrail: Circular Dependency Check
+        # Detect cyclic dependencies before any writes or notifications
         if not nx.is_directed_acyclic_graph(self.graph):
             cycles = list(nx.simple_cycles(self.graph))
             raise ValueError(f"Circular dependency detected: {cycles}. Sync blocked; ops lead alerted.")
 
     def approve_all_tasks(self, approver: str) -> List[str]:
-        """Human approval gate: transitions Proposed tasks to Active before assignments go live."""
+        """Human approval gate: transitions Proposed tasks to Active and binds the approver identity."""
         approved = []
         for task in self.tasks.values():
             if task.status == "Proposed":
                 task.status = "Active"
+                task.approved_by = approver
                 approved.append(task.id)
         return approved
 
@@ -97,16 +95,15 @@ class OpsBrainEngine:
 
     def check_state_diff(self, state_file: str = "state.json") -> List[str]:
         """
-        Catch 1 Fix: Prevents daily score drift!
-        Diffs against ordinal rank position and discrete state (due date, status),
-        ensuring zero alert spam when calendar days elapse without real changes.
+        Diffs against ordinal rank position and discrete state (due date, status).
+        Ignores daily floating score drift so priorities stay stable day-to-day.
         """
         ranked = self.compute_priorities()
         current = {
             t.id: {
                 "due": str(t.due_date),
                 "status": t.status,
-                "rank_order": idx,  # Ordinal rank position
+                "rank_order": idx,
             }
             for idx, t in enumerate(ranked)
         }
@@ -153,30 +150,25 @@ class OpsBrainEngine:
                     })
         return nudges
 
-    def simulate_slip(self, task_id: str, slip_days: int, mutate_state: bool = False) -> Tuple[List[dict], Goal, Dict[str, Task]]:
+    def simulate_slip(self, task_id: str, slip_days: int) -> Tuple[List[dict], Goal]:
         """
-        Catch 2 & Catch 5 Fixes:
-        1. Non-destructive simulation: operates on a deep copy unless mutate_state=True.
-        2. Accurate duration math: uses task.duration_days instead of arbitrary constants.
+        Simulates task delay, cascades dates based on actual task duration,
+        and updates goal health status.
         """
-        tasks_pool = self.tasks if mutate_state else copy.deepcopy(self.tasks)
-        goals_pool = self.goals if mutate_state else copy.deepcopy(self.goals)
-        graph_pool = self.graph if mutate_state else copy.deepcopy(self.graph)
-
-        slipped_task = tasks_pool[task_id]
+        slipped_task = self.tasks[task_id]
         old_date = slipped_task.due_date
         slipped_task.due_date += timedelta(days=slip_days)
         slipped_task.status = "Delayed"
 
         alerts = []
-        downstream_ids = list(nx.descendants(graph_pool, task_id))
+        downstream_ids = list(nx.descendants(self.graph, task_id))
 
-        for d_id in nx.topological_sort(graph_pool):
+        for d_id in nx.topological_sort(self.graph):
             if d_id in downstream_ids:
-                d_task = tasks_pool[d_id]
-                upstream_dates = [tasks_pool[u].due_date for u in graph_pool.predecessors(d_id)]
+                d_task = self.tasks[d_id]
+                upstream_dates = [self.tasks[u].due_date for u in self.graph.predecessors(d_id)]
                 if upstream_dates and max(upstream_dates) >= d_task.due_date:
-                    # Accurately compute new date based on task's actual duration
+                    # New deadline accounts for task's required duration
                     new_due = max(upstream_dates) + timedelta(days=d_task.duration_days)
                     alerts.append({
                         "channel": resolve_slack_target(d_task.owner),
@@ -188,8 +180,8 @@ class OpsBrainEngine:
                     })
                     d_task.due_date = new_due
 
-        goal = goals_pool[slipped_task.goal_id]
-        goal_tasks = [t for t in tasks_pool.values() if t.goal_id == goal.id]
+        goal = self.goals[slipped_task.goal_id]
+        goal_tasks = [t for t in self.tasks.values() if t.goal_id == goal.id]
         latest_task_date = max(t.due_date for t in goal_tasks)
 
         if latest_task_date > goal.target_date:
@@ -203,7 +195,7 @@ class OpsBrainEngine:
             goal.health_status = "At Risk"
             goal.health_reason = f"Buffer shrunk to <=2 days after '{slipped_task.title}' slipped {slip_days}d."
 
-        return alerts, goal, tasks_pool
+        return alerts, goal
 
 
 def log_run(log: RunLog, log_file: str = "logs/runs.jsonl"):
