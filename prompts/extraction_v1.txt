@@ -1,13 +1,15 @@
-Extract ALL company Goals and ALL dependency-linked Tasks from these meeting notes.
-Return ONLY valid JSON matching this exact structure (use YYYY-MM-DD for dates):
+You are a precision enterprise task extraction engine. Extract ALL company Goals and ALL dependency-linked Tasks from meeting notes.
+Reference Anchor Date: {today_date} ({day_of_week}).
+All relative temporal phrases ("next Tuesday", "in 10 days", "by Friday") MUST be calculated strictly relative to {today_date}.
 
+Return ONLY valid JSON matching this exact structure:
 {
   "goals": [
     {
       "id": "G1",
       "title": "string",
       "owner": "string",
-      "target_date": "2026-12-15",
+      "target_date": "YYYY-MM-DD",
       "priority_weight": 3
     }
   ],
@@ -16,13 +18,11 @@ Return ONLY valid JSON matching this exact structure (use YYYY-MM-DD for dates):
       "id": "T1",
       "title": "string",
       "owner": "string",
-      "due_date": "2026-11-22",
+      "due_date": "YYYY-MM-DD",
+      "duration_days": 2,
       "status": "Proposed",
       "goal_id": "G1",
       "blocked_by": []
     }
   ]
 }
-
-Meeting Notes:
-{notes_text}

@@ -25,6 +25,7 @@
       "title": "Finalize botanical flavor stability test for Focus pouch",
       "owner": "Shahaan",
       "due_date": "2026-11-22",
+      "duration_days": 2,
       "status": "Proposed",
       "goal_id": "G1",
       "blocked_by": []
@@ -34,6 +35,7 @@
       "title": "Send final ingredient list to packaging vendor to lock pouch print files",
       "owner": "Riya",
       "due_date": "2026-11-26",
+      "duration_days": 3,
       "status": "Proposed",
       "goal_id": "G1",
       "blocked_by": ["T1"]
@@ -43,6 +45,7 @@
       "title": "Kick off 5,000-unit pouch print run",
       "owner": "Shahaan",
       "due_date": "2026-12-04",
+      "duration_days": 5,
       "status": "Proposed",
       "goal_id": "G1",
       "blocked_by": ["T2"]
@@ -52,6 +55,7 @@
       "title": "Shoot product campaign photos",
       "owner": "Bhargav",
       "due_date": "2026-12-09",
+      "duration_days": 3,
       "status": "Proposed",
       "goal_id": "G1",
       "blocked_by": ["T3"]
@@ -61,6 +65,7 @@
       "title": "Push live storefront update on Vercel",
       "owner": "Bhargav",
       "due_date": "2026-12-13",
+      "duration_days": 2,
       "status": "Proposed",
       "goal_id": "G1",
       "blocked_by": ["T4"]
@@ -70,6 +75,7 @@
       "title": "Compile shortlist of 20 Mumbai fitness influencers",
       "owner": "Riya",
       "due_date": "2026-11-23",
+      "duration_days": 3,
       "status": "Proposed",
       "goal_id": "G2",
       "blocked_by": []

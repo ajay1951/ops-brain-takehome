@@ -16,6 +16,7 @@ class Task(BaseModel):
     title: str
     owner: str
     due_date: date
+    duration_days: int = Field(default=2, ge=1)
     status: str = "Proposed"
     goal_id: str
     blocked_by: List[str] = Field(default_factory=list)

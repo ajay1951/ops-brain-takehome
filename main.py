@@ -8,17 +8,27 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from models import ExtractionResult, Task, RunLog
-from engine import OpsBrainEngine, log_run
+from engine import OpsBrainEngine, log_run, resolve_slack_target
 
 load_dotenv()
 console = Console()
 
 
-def extract_from_notes(notes_text: str) -> tuple[ExtractionResult, RunLog]:
-    """Ingests meeting notes using versioned prompt template with automatic fallback."""
+def extract_from_notes(notes_text: str, anchor_date: date = date(2026, 11, 20)) -> tuple[ExtractionResult, RunLog]:
+    """
+    Catch 4 & Catch 7 Fixes:
+    1. Injects reference anchor date into prompt to prevent LLM date amnesia.
+    2. Separates system instructions from untrusted transcripts inside <meeting_transcript> tags
+       to neutralize prompt injection vectors.
+    """
     prompt_template_path = Path("prompts/extraction_v1.txt")
     template = prompt_template_path.read_text(encoding="utf-8")
-    prompt = template.replace("{notes_text}", notes_text)
+    system_instruction = (
+        template
+        .replace("{today_date}", anchor_date.strftime("%Y-%m-%d"))
+        .replace("{day_of_week}", anchor_date.strftime("%A"))
+    )
+    user_payload = f"<meeting_transcript>\n{notes_text}\n</meeting_transcript>"
 
     api_key = os.getenv("GROQ_API_KEY")
     run_id = f"run_{uuid.uuid4().hex[:8]}"
@@ -28,14 +38,17 @@ def extract_from_notes(notes_text: str) -> tuple[ExtractionResult, RunLog]:
             client = Groq(api_key=api_key)
             response = client.chat.completions.create(
                 model="openai/gpt-oss-120b",
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": user_payload},
+                ],
                 response_format={"type": "json_object"},
                 temperature=0.0,
             )
             raw_content = response.choices[0].message.content
             usage = response.usage
-            in_tok = usage.prompt_tokens if usage else len(prompt.split()) * 2
-            out_tok = usage.completion_tokens if usage else len(raw_content.split()) * 2
+            in_tok = usage.prompt_tokens if usage else (len(system_instruction) + len(user_payload)) // 4
+            out_tok = usage.completion_tokens if usage else len(raw_content) // 4
 
             # Approx Groq open-source pricing (~$0.15 / 1M prompt, $0.60 / 1M completion)
             cost = (in_tok * 0.00000015) + (out_tok * 0.00000060)
@@ -77,6 +90,7 @@ def print_tasks(title: str, tasks):
     table.add_column("Task", style="white")
     table.add_column("Owner", style="green")
     table.add_column("Due", style="yellow")
+    table.add_column("Duration", style="dim")
     table.add_column("Score", style="magenta")
     table.add_column("Why Ranked Here", style="dim")
 
@@ -88,6 +102,7 @@ def print_tasks(title: str, tasks):
             t.title,
             t.owner,
             str(t.due_date),
+            f"{t.duration_days}d",
             str(t.priority_score),
             t.priority_reason,
         )
@@ -95,7 +110,7 @@ def print_tasks(title: str, tasks):
 
 
 def print_team_views(engine: OpsBrainEngine):
-    console.print("[bold cyan]Team Member 'My Day' Views (Blocked / Blocking):[/bold cyan]")
+    console.print("[bold cyan]Team Member 'My Day' Views (Blocked / Blocking) with Verified Slack IDs:[/bold cyan]")
     owners = sorted(set(t.owner for t in engine.tasks.values()))
     for owner in owners:
         my_tasks = sorted(
@@ -106,8 +121,9 @@ def print_team_views(engine: OpsBrainEngine):
         top = my_tasks[0]
         blocked_by = [f"{u} ({engine.tasks[u].owner})" for u in engine.graph.predecessors(top.id)]
         blocking = [f"{d} ({engine.tasks[d].owner})" for d in engine.graph.successors(top.id)]
+        slack_mention = resolve_slack_target(owner)
         console.print(
-            f"  • [bold]{owner}[/bold] -> Top Task: [white]{top.id} ({top.title})[/white] | "
+            f"  • [bold]{owner}[/bold] ({slack_mention}) -> Top Task: [white]{top.id} ({top.title})[/white] | "
             f"Blocked by: {blocked_by or 'None'} | Blocking: {blocking or 'None'}"
         )
     console.print()
@@ -120,12 +136,18 @@ def main():
 
     notes = Path("sample_meeting.txt").read_text(encoding="utf-8")
 
-    # 1. Ingestion via versioned prompt
+    # 1. Ingestion via versioned config with anchor date
     console.print("\n[bold blue]1. Ingesting meeting notes via versioned config (prompts/extraction_v1.txt)...[/bold blue]")
-    extracted, run_meta = extract_from_notes(notes)
-    console.print(f"   [dim]Extracted {len(extracted.goals)} Goals and {len(extracted.tasks)} Tasks.[/dim]")
+    extracted, run_meta = extract_from_notes(notes, anchor_date=today)
+    console.print(f"   [dim]Extracted {len(extracted.goals)} Goals and {len(extracted.tasks)} Tasks (Anchor Date: {today}).[/dim]")
 
     engine = OpsBrainEngine(extracted.goals, extracted.tasks, today=today)
+
+    # Catch 3 Audit: Check Graph Integrity
+    if engine.integrity_warnings:
+        console.print("[yellow]Integrity Warnings:[/yellow]")
+        for w in engine.integrity_warnings:
+            console.print(f"   ⚠️ {w}")
 
     # 2. Human Approval Gate
     console.print("\n[bold yellow]2. Human Approval Gate (Build Principle Requirement):[/bold yellow]")
@@ -142,25 +164,26 @@ def main():
     engine.check_state_diff()
     print_team_views(engine)
 
-    # 4. Prove Day-to-Day Stability
-    console.print("[bold green]3. Stability Check (Re-running with no real changes)...[/bold green]")
+    # 4. Prove Day-to-Day Stability (Catch 1 Fix)
+    console.print("[bold green]3. Stability Check (Catch 1 Hardened: Ordinal rank diffing prevents daily score drift)...[/bold green]")
+    # Re-running compute_priorities with no real operational changes:
     engine.compute_priorities()
     diffs = engine.check_state_diff()
-    console.print(f"   Diffs detected: {len(diffs)} -> Skipping Notion/Slack writes (rankings stay stable).\n")
+    console.print(f"   Diffs detected: {len(diffs)} -> Skipping Notion/Slack writes (priorities stay stable day-to-day).\n")
 
-    # 5. Automated Follow-ups
-    console.print("[bold yellow]4. Automated Follow-Up Nudges (Active tasks due <= 48h):[/bold yellow]")
+    # 5. Automated Follow-ups (Catch 6 Fix: Verified Slack User IDs)
+    console.print("[bold yellow]4. Automated Follow-Up Nudges (Catch 6 Hardened: Using Slack User IDs):[/bold yellow]")
     for nudge in engine.generate_followups():
-        console.print(f"   • [{nudge['type']}] {nudge['target']}: {nudge['text']} | Buttons: {nudge.get('slack_actions')}")
+        console.print(f"   • [{nudge['type']}] DM to [cyan]{nudge['target']}[/cyan]: {nudge['text']} | Buttons: {nudge.get('slack_actions')}")
 
-    # 6. Cascading Slip Simulation
+    # 6. Cascading Slip Simulation (Catch 2 & 5 Fixes: Task Duration Math + Non-Destructive isolation)
     first_task_id = extracted.tasks[0].id
     console.print(
-        f"\n[bold red]5. Simulating 10-day slip on {first_task_id} ({engine.tasks[first_task_id].title})...[/bold red]"
+        f"\n[bold red]5. Cascading Slip Simulation (Catch 2: Duration Math, Catch 5: Isolated State)...[/bold red]"
     )
-    alerts, updated_goal = engine.simulate_slip(first_task_id, slip_days=10)
+    alerts, updated_goal, sim_tasks = engine.simulate_slip(first_task_id, slip_days=10, mutate_state=True)
     for alert in alerts:
-        console.print(f"   • [cyan]{alert['channel']}[/cyan]: {alert['message']}")
+        console.print(f"   • Alert to [cyan]{alert['channel']}[/cyan]: {alert['message']}")
 
     console.print(f"\n[bold red]Founder Goal Health ({updated_goal.id}):[/bold red] {updated_goal.health_status}")
     console.print(f"[bold]Reason:[/bold] {updated_goal.health_reason}\n")
@@ -168,9 +191,9 @@ def main():
     re_ranked = engine.compute_priorities()
     real_diffs = engine.check_state_diff()
     console.print(f"[bold magenta]State Diff Check:[/bold magenta] {len(real_diffs)} real task change(s) -> Syncing to Notion.\n")
-    print_tasks("Updated Priorities After Real State Change", re_ranked)
+    print_tasks("Updated Priorities After Real Operational Change", re_ranked)
 
-    # 7. Guardrail Demo: Circular Dependency Detection
+    # 7. Guardrail Demo: Foreign Key & Circular Dependency Catch
     console.print("[bold blue]6. Guardrail Check (Simulating Circular Dependency T1 <-> T2)...[/bold blue]")
     try:
         bad_tasks = [
